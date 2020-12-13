@@ -1,6 +1,7 @@
 package clang
 
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -10,6 +11,7 @@ import (
 /*
 // #cgo CFLAGS: -std=c99
 #cgo CFLAGS: -O0
+#cgo CXXFLAGS: -O0
 #cgo LDFLAGS: -lclang -lclang-cpp -lLLVM
 
 #include <stdbool.h>
@@ -32,21 +34,30 @@ extern bool clang_Type_isTemplateTypeParmType(void* typex);
 extern bool clang_Type_isUndeducedType(void* typex);
 extern bool clang_Type_isTrivialType(void* typex, void*au);
 extern bool clang_Type_isTriviallyCopyableType(void* typex, void*au);
+extern int clang_Type_getKind(void* typex);
 extern void* clang_Type_getUnqualifiedDesugaredType(void* typex);
 extern void* clang_Type_removeLocalConst(void* typex);
 extern void* clang_Type_getAsCXXRecordDecl(void* typex);
 
 extern void* clang_CreateLLVMCodeGen2(void*);
+extern void* clang_CodeGen_arrangeFreeFunctionType(void* cg,
+                                                   void *Ty);
 extern void* clang_CodeGen_arrangeCXXMethodType(void* cg,
                                              void *RD,
                                              void *FTP,
                                              void *MD);
 extern void* clang_CodeGen_convertFreeFunctionType(void* cg, void *FD);
+extern void* clang_CodeGen_convertTypeForMemory(void* cg,
+                                             void* type_);
 
 extern bool clang_CodeGen_isStructRet(void* fni) ;
 extern int clang_CodeGen_arg_size(void* fni);
+extern int clang_CodeGen_ABIArgInfoKind(void* fni, int idx);
+extern void* clang_CodeGen_ABIArgInfoType(void* fni, int idx);
+extern void* clang_CodeGen_getArgStruct(void* fni);
 
 extern int llvm_Type_getFunctionNumParams(void* typex);
+extern int llvm_Type_getStructNumElements(void* typex);
 extern void llvm_Type_delete(void* typex);
 */
 import "C"
@@ -157,6 +168,76 @@ func (c Cursor) ArgSize(fni unsafe.Pointer) int {
 	return int(rv)
 }
 
+type CGABIArgInfoKind int
+
+const (
+	Direct          CGABIArgInfoKind = 0
+	Extend          CGABIArgInfoKind = 1
+	Indirect        CGABIArgInfoKind = 2
+	Ignore          CGABIArgInfoKind = 3
+	Expand          CGABIArgInfoKind = 4
+	CoerceAndExpand CGABIArgInfoKind = 5
+	InAlloca        CGABIArgInfoKind = 6
+)
+
+func (v CGABIArgInfoKind) String() string {
+	var str string
+	switch v {
+	case Direct:
+		str = "Direct"
+	case Extend:
+		str = "Extend"
+	case Indirect:
+		str = "Indirect"
+	case Ignore:
+		str = "Ignore"
+	case Expand:
+		str = "Expand"
+	case CoerceAndExpand:
+		str = "CoerceAndExpand"
+	case InAlloca:
+		str = "InAlloca"
+	default:
+		str = fmt.Sprintf("Unknown%d", v)
+	}
+	return str
+}
+
+// idx=-1 for return arg
+func (c Cursor) ABIArgInfoKind(fni unsafe.Pointer, idx int) CGABIArgInfoKind {
+	rv := C.clang_CodeGen_ABIArgInfoKind(fni, C.int(idx))
+	return CGABIArgInfoKind(rv)
+}
+
+// idx=-1 for return arg
+func (c Cursor) ABIArgInfoType(fni unsafe.Pointer, idx int) Type {
+	rv := C.clang_CodeGen_ABIArgInfoType(fni, C.int(idx))
+	newty := c.Type().newTypeFromptr(rv)
+	return newty
+}
+
+func (t Type) newTypeFromptr(typtr unsafe.Pointer) Type {
+	kind := C.clang_Type_getKind(typtr)
+	newty := t
+	newty.c.kind = uint32(kind)
+	newty.c.data[0] = C.ulong(uintptr(typtr))
+	return newty
+}
+
+func (c Cursor) ArgStruct(fni unsafe.Pointer) unsafe.Pointer {
+	rv := C.clang_CodeGen_getArgStruct(fni)
+	return rv
+}
+
+func (c Cursor) LLVMNumElements(fni unsafe.Pointer) int {
+	sty := c.ArgStruct(fni)
+	if sty == nil {
+		return 0
+	}
+	rv := C.llvm_Type_getStructNumElements(sty)
+	return int(rv)
+}
+
 // for CXType
 // isFunctionType
 // isTemplateType
@@ -242,6 +323,12 @@ type CGFunctionInfo struct {
 	Cthis unsafe.Pointer
 }
 
+func (this *CodeGenerator) ArrangeFreeFunctionType(cursor Cursor) unsafe.Pointer {
+	fnproto := cursor.GetFunctionProtoType()
+	rv := C.clang_CodeGen_arrangeFreeFunctionType(this.Cthis, fnproto)
+	return rv
+}
+
 // 有模板返回值/参数时会crash，其他情况可用了
 // param cursor CXXMethodDecl/FunctionDecl
 // param parent ClassDecl
@@ -261,6 +348,11 @@ func (this *CodeGenerator) ArrangeCXXMethodType(cursor, parent Cursor) unsafe.Po
 // return llvm::FunctionType*, need delete
 func (this *CodeGenerator) ConvertFreeFunctionType(cursor Cursor) unsafe.Pointer {
 	rv := C.clang_CodeGen_convertFreeFunctionType(this.Cthis, cursor.decl())
+	return rv
+}
+
+func (this *CodeGenerator) ConvertTypeForMemory(ty Type) unsafe.Pointer {
+	rv := C.clang_CodeGen_convertTypeForMemory(this.Cthis, ty.unpack())
 	return rv
 }
 
