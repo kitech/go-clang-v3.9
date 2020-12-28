@@ -41,7 +41,7 @@ extern void* clang_Type_getAsCXXRecordDecl(void* typex);
 
 extern void* clang_CreateLLVMCodeGen2(void*);
 extern void* clang_CodeGen_arrangeFreeFunctionType(void* cg,
-                                                   void *Ty);
+                                                      void *FD);
 extern void* clang_CodeGen_arrangeCXXMethodType(void* cg,
                                              void *RD,
                                              void *FTP,
@@ -323,9 +323,9 @@ type CGFunctionInfo struct {
 	Cthis unsafe.Pointer
 }
 
+// support non method function
 func (this *CodeGenerator) ArrangeFreeFunctionType(cursor Cursor) unsafe.Pointer {
-	fnproto := cursor.GetFunctionProtoType()
-	rv := C.clang_CodeGen_arrangeFreeFunctionType(this.Cthis, fnproto)
+	rv := C.clang_CodeGen_arrangeFreeFunctionType(this.Cthis, cursor.decl())
 	return rv
 }
 

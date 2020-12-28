@@ -227,12 +227,18 @@ extern "C" {
         return cg;
     }
 
+    // its works, code from  CodeGenTypes::arrangeFunctionDeclaration
     const void* clang_CodeGen_arrangeFreeFunctionType(CodeGenerator* cg,
-                                                      FunctionProtoType *Ty) {
+                                                      FunctionDecl *FD) {
         CodeGenModule &CGM = cg->CGM();
-        CanQual<FunctionProtoType> canty =
-            CanQual<FunctionProtoType>::getFromOpaquePtr(Ty);
-        auto& fni = arrangeFreeFunctionType(CGM, canty);
+        CanQualType FTy = FD->getType()->getCanonicalTypeUnqualified();
+
+        if (CanQual<FunctionNoProtoType> noProto = FTy.getAs<FunctionNoProtoType>()) {
+            auto& fni = arrangeFreeFunctionType(CGM, noProto);
+            return &fni;
+        }
+
+        auto& fni = arrangeFreeFunctionType(CGM, FTy.castAs<FunctionProtoType>());
         return &fni;
     }
 
@@ -258,6 +264,8 @@ extern "C" {
         const CGFunctionInfo *fnip = &fni;
         return fnip;
     }
+
+    
 
     void* clang_CodeGen_convertFreeFunctionType(CodeGenerator* cg,
                                                 const FunctionDecl *FD) {
